@@ -9,7 +9,7 @@ import yfinance as yf
 import time
 import json
 import os
-
+LINE_TOKEN = st.secrets.get("LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN", "LINE_USER_ID")
 # 嘗試導入富途 API
 try:
     from futu import *
@@ -17,14 +17,6 @@ try:
 except ImportError:
     FUTU_AVAILABLE = False
 
-# ==========================================
-# LINE 配置信息
-# ==========================================
-LINE_CHANNEL_SECRET = "0ace01f20098b294c462404e079f3584"
-LINE_CHANNEL_ACCESS_TOKEN = "4W6+YgAxXzVJhie/z1CquX6e4vhCQZ/ctHZJhp4+32EwDJdr3cAf9kfYEO9FTTPhpMb8AWCyVIsHuZxuCJKrcHb43sUV5mx9rHso1wCQNuDSBKc74eR9zdNviFGuoJcCLF2ZyQeG60jFjh2nsbsCUwdB04t89/1O/w1cDnyilFU="
-LINE_USER_ID = "U80230c7dd330d8710c75da0b01f60c7d"
-
-# ==========================================
 # 股票名稱映射表 (中英對照)
 # ==========================================
 STOCK_NAMES = {

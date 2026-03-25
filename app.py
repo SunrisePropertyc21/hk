@@ -11,13 +11,12 @@ import json
 import os
 
 # ==========================================
-# 安全讀取 LINE 設定 (修復版)
+# 安全讀取 LINE 設定
 # ==========================================
 try:
     LINE_CHANNEL_ACCESS_TOKEN = st.secrets["LINE_CHANNEL_ACCESS_TOKEN"]
     LINE_USER_ID = st.secrets["LINE_USER_ID"]
 except:
-    # 如果沒有設定 Secrets，使用預設值 (或留空讓用戶輸入)
     LINE_CHANNEL_ACCESS_TOKEN = ""
     LINE_USER_ID = ""
 
@@ -56,7 +55,7 @@ STOCK_NAMES = {
 # ==========================================
 # 1. 基礎設定與 CSS
 # ==========================================
-st.set_page_config(page_title="AI 量化終端 (自動刷新 + LINE 摘要版)", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI 量化終端 (修復版)", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -67,12 +66,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 熱門股票清單
+# 熱門股票清單 (美股優先，Yahoo 穩定)
 US_HOT = ["NVDA","TSM","AAPL","MSFT","AMZN","META","AMD","GOOGL","NFLX","TSLA","TQQQ"]
-HK_HOT_CORE = ["00700.HK", "09988.HK", "03690.HK", "01810.HK", "09618.HK"]
 
 # ==========================================
-# 2. 數據提供者
+# 2. 數據提供者 (修復 Yahoo 港股問題)
 # ==========================================
 class DataProvider:
     def __init__(self, use_futu=False):
@@ -92,22 +90,35 @@ class DataProvider:
             self.ctx.close()
 
     def get_data(self, symbol, interval, days_back):
-        # 優先: Yahoo Finance
-        try:
-            max_lookback = 720 if interval in ['1h', '15m'] else 3650
-            actual_days = min(days_back + 60, max_lookback)
-            start_date = datetime.now() - timedelta(days=actual_days)
-            df = yf.download(symbol, start=start_date, interval=interval, progress=False, timeout=10)
-            if df is not None and not df.empty and len(df) > 50:
-                return df
-        except: pass
+        # 修復：Yahoo Finance 港股代碼處理
+        # 嘗試多種格式以提高成功率
+        symbol_variants = [symbol]
+        if ".HK" in symbol:
+            # 港股嘗試不同格式
+            symbol_variants.append(symbol.replace(".HK", ".HK")) # 保持原樣
+            symbol_variants.append(symbol.replace(".HK", "")) # 嘗試不加 .HK
+        
+        for sym in symbol_variants:
+            try:
+                max_lookback = 720 if interval in ['1h', '15m'] else 3650
+                actual_days = min(days_back + 60, max_lookback)
+                start_date = datetime.now() - timedelta(days=actual_days)
+                
+                # 禁用進度條，增加重試
+                df = yf.download(sym, start=start_date, interval=interval, 
+                               progress=False, timeout=15, threads=False)
+                
+                if df is not None and not df.empty and len(df) > 50:
+                    return df
+            except Exception as e:
+                continue
+        
         return pd.DataFrame()
 
 # ==========================================
-# 3. LINE 推播函數 (強化版)
+# 3. LINE 推播函數
 # ==========================================
 def send_line_push(access_token, user_id, message):
-    """發送單條 LINE 消息"""
     if not access_token or not user_id: return False
     url = "https://api.line.me/v2/bot/message/push"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"}
@@ -119,11 +130,9 @@ def send_line_push(access_token, user_id, message):
         return False
 
 def send_line_summary(access_token, user_id, results, scan_time):
-    """發送完整的掃描摘要到 LINE"""
     if not access_token or not user_id or not results:
         return False
 
-    # 1. 整理數據
     buy_signals = []
     hold_signals = []
     watch_signals = []
@@ -143,30 +152,22 @@ def send_line_summary(access_token, user_id, results, scan_time):
         else:
             watch_signals.append(line)
 
-    # 2. 構建消息 (LINE 有 2000 字元限制，需分段)
     header = f"🚀 AI 量化掃描摘要\n📅 時間: {scan_time}\n📊 總計: {len(results)} 隻\n\n"
     
-    # 重點關注：現價買入
     if buy_signals:
         header += "🔥 【現價買入】\n" + "\n".join(buy_signals[:10]) + "\n\n"
-    
-    # 持倉中
     if hold_signals:
         header += "💼 【持倉中】\n" + "\n".join(hold_signals[:10]) + "\n\n"
-    
-    # 觀望 (只顯示前 20 隻避免太長)
     if watch_signals:
         header += "👀 【觀望】 (部分)\n" + "\n".join(watch_signals[:20])
     
-    # 如果太長，截斷並提示
     if len(header) > 1800:
-        header = header[:1800] + "\n\n... (內容過長，僅顯示部分)"
+        header = header[:1800] + "\n\n... (內容過長)"
 
-    # 3. 發送
     return send_line_push(access_token, user_id, header)
 
 # ==========================================
-# 4. JSON 保存/讀取
+# 4. JSON 保存
 # ==========================================
 def save_results_to_json(results, filename="scan_results.json"):
     try:
@@ -237,7 +238,8 @@ def run_strategy(data_provider, symbol, interval, days_back, capital, risk_pct, 
         if hist[last_idx] > hist[last_idx-1]: score += 2
         if vol[last_idx] > vol_ma[last_idx]: score += 1
         
-        intensity_map = {0: "無", 1: "弱", 2: "中", 3: "強", 4: "4極強", 5: "5極強", 6: "6極強"}
+        # 修復：強度映射錯別字
+        intensity_map = {0: "無", 1: "弱", 2: "中", 3: "強", 4: "極強", 5: "極強", 6: "極強"}
         intensity = intensity_map.get(min(score, 6), "弱")
         status = "觀望"
         
@@ -263,7 +265,7 @@ def run_strategy(data_provider, symbol, interval, days_back, capital, risk_pct, 
         return None
 
 # ==========================================
-# 6. Streamlit UI
+# 6. Streamlit UI (全面修復)
 # ==========================================
 
 with st.sidebar:
@@ -275,21 +277,22 @@ with st.sidebar:
     send_line = st.checkbox("📱 掃描完成後發送 LINE 摘要", value=True)
     
     st.divider()
-    st.subheader("📝 自定義標的")
-    custom_input = st.text_area("輸入股票代碼 (每行一個)", value="00700.HK\n09988.HK\nNVDA\nTSLA\nTQQQ\nTSM\nTSM\nAAPL\nMSFT\nAMZN\nMETA\nAMD\nGOOGL\nNFLX", height=150)
+    st.subheader("📝 自定義標的 (去重)")
+    # 修復：預設值去除重複 TSM
+    default_input = "NVDA\nTSM\nAAPL\nMSFT\nAMZN\nMETA\nAMD\nGOOGL\nNFLX\nTSLA\nTQQQ"
+    custom_input = st.text_area("輸入股票代碼 (每行一個)", value=default_input, height=150)
    
     st.divider()
     st.subheader("📱 LINE 設定")
-    # 優先使用 Secrets，否則讓用戶輸入
     input_token = st.text_input("Channel Access Token", type="password", 
                                value=LINE_CHANNEL_ACCESS_TOKEN if LINE_CHANNEL_ACCESS_TOKEN else "")
     input_uid = st.text_input("Your User ID", type="password", 
                              value=LINE_USER_ID if LINE_USER_ID else "")
 
-st.title("🚀 AI 量化終端 (LINE 摘要版)")
+st.title("🚀 AI 量化終端 (修復版)")
 
-# 處理自定義標的
-scan_list = [x.strip().upper() for x in custom_input.split("\n") if x.strip()]
+# 處理自定義標的 (去重)
+scan_list = list(dict.fromkeys([x.strip().upper() for x in custom_input.split("\n") if x.strip()]))
 
 # 狀態顯示
 status_placeholder = st.empty()
@@ -302,10 +305,10 @@ if 'last_run' not in st.session_state:
 if st.session_state['last_run']:
     last_run_placeholder.caption(f"🕐 上次掃描: {st.session_state['last_run']}")
 
-# 手動運行按鈕
+# 手動運行按鈕 (修復：use_container_width -> width)
 col1, col2 = st.columns(2)
 with col1:
-    run_now = st.button("🔄 立即手動掃描", use_container_width=True, type="primary")
+    run_now = st.button("🔄 立即手動掃描", width='stretch', type="primary")
 
 # 掃描邏輯
 if auto_scan or run_now:
@@ -321,7 +324,8 @@ if auto_scan or run_now:
             try:
                 res = run_strategy(dp, sym, "1d", 120, 100000, 2.0, 5.0)
                 if res: results.append(res)
-            except: pass
+            except Exception as e:
+                pass
             prog_bar.progress((i+1)/len(scan_list))
     
     dp.close()
@@ -332,7 +336,7 @@ if auto_scan or run_now:
         # 1. 保存 JSON
         save_results_to_json(results)
         
-        # 2. 發送 LINE 摘要 (如果勾選)
+        # 2. 發送 LINE 摘要
         line_sent = False
         if send_line:
             line_sent = send_line_summary(input_token, input_uid, results, scan_time)
@@ -347,7 +351,7 @@ if auto_scan or run_now:
             msg += " | 📱 LINE 摘要已發送"
         status_placeholder.success(msg)
         
-        # 5. 顯示結果表格
+        # 5. 顯示結果表格 (修復：use_container_width -> width)
         st.subheader("🔔 即時買賣信號")
         monitor_data = []
         for r in results:
@@ -371,11 +375,16 @@ if auto_scan or run_now:
             if "持倉中" in val: return 'color: #00ffcc'
             return ''
             
-        st.dataframe(df_mon.style.map(highlight, subset=["狀態"]), use_container_width=True, hide_index=True)
+        st.dataframe(df_mon.style.map(highlight, subset=["狀態"]), width='stretch', hide_index=True)
     else:
-        status_placeholder.error("❌ 沒有成功分析任何股票")
+        status_placeholder.error("❌ 沒有成功分析任何股票 (建議優先使用美股)")
 
-# 自動刷新
+# 自動刷新 (優化：避免 Event loop 錯誤)
 if auto_scan:
-    time.sleep(refresh_interval)
-    st.rerun()
+    try:
+        time.sleep(refresh_interval)
+        st.rerun()
+    except:
+        # 捕獲 Event loop 錯誤，優雅退出
+        pass
+

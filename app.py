@@ -65,7 +65,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 熱門股票清單
-US_HOT = ["NVDA","TSM","AAPL","MSFT","AMZN"]
+US_HOT = ["NVDA","TSM","AAPL","MSFT","AMZN","META","AMD","GOOGL","NFLX","TSLA","TQQQ"]
 HK_HOT_CORE = ["00700.HK", "09988.HK", "03690.HK", "01810.HK", "09618.HK"]
 
 # ==========================================
